@@ -544,22 +544,6 @@ bikeRacks <-
      st_transform(st_crs(fishnet)) %>%
      mutate(Legend = "Bike_Racks")
 
-ctaStations <- 
-    read.socrata("./data/cta_entrances.geojson") %>%
-     dplyr::select(Y = latitude, X = longitude) %>%
-     na.omit() %>%
-     st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant") %>%
-     st_transform(st_crs(fishnet)) %>%
-     mutate(Legend = "Grocery_Stores")
-
-metraStations <- 
-    read.socrata("./data/metra_entrances.geojson") %>%
-     dplyr::select(Y = latitude, X = longitude) %>%
-     na.omit() %>%
-     st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant") %>%
-     st_transform(st_crs(fishnet)) %>%
-     mutate(Legend = "Grocery_Stores")
-
 groceryStores <- 
     read.socrata("https://data.cityofchicago.org/resource/ce29-twzt.json") %>%
      dplyr::select(Y = latitude, X = longitude) %>%
@@ -575,3 +559,22 @@ neighborhoods <-
 
 
 ```
+
+```{r}
+ctaStations <- 
+    read.socrata("data/cta_entrances.geojson") %>%
+     dplyr::select(Y = latitude, X = longitude) %>%
+     na.omit() %>%
+     st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant") %>%
+     st_transform(st_crs(fishnet)) %>%
+     mutate(Legend = "CTA Stations")
+
+metraStations <- 
+    read.socrata("https://github.com/roshiniganesh/Geospatial-risk-prediction/blob/main/data/metra_entrances.geojson") %>%
+     dplyr::select(Y = latitude, X = longitude) %>%
+     na.omit() %>%
+     st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant") %>%
+     st_transform(st_crs(fishnet)) %>%
+     mutate(Legend = "METRA Stations")
+```
+

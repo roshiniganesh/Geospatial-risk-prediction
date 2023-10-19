@@ -1,0 +1,10 @@
+"0","ctaStations <- "
+"0","    read.socrata(""data/cta_entrances.geojson"") %>%"
+"0","     dplyr::select(Y = latitude, X = longitude) %>%"
+"0","     na.omit() %>%"
+"0","     st_as_sf(coords = c(""X"", ""Y""), crs = 4326, agr = ""constant"") %>%"
+"0","     st_transform(st_crs(fishnet)) %>%"
+"0","     mutate(Legend = ""CTA Stations"")"
+"2","Error in validateUrl(url, app_token) : 
+  data/cta_entrances.geojson does not appear to be a valid URL.
+"
