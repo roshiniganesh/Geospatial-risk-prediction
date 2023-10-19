@@ -1,30 +1,577 @@
 ---
-title: "Assignment 3_Roshini Ganesh"
-author: "Roshini Ganesh"
+title: "Predicting Housing Prices in Philadelphia, PA"
+author: "Samriddhi Khare, Roshini Ganesh"
 date: "`r Sys.Date()`"
-output: html_document
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    code_download: true
+    theme: journal  
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+# Introduction
+
+This code is built upon the classwork discussed [here](https://github.com/mafichman/musa_5080_2023/tree/main).
+
+```{r Setup Knitting Parameters, include=FALSE}
+  knitr::opts_chunk$set(
+    echo = TRUE,
+    warning = FALSE,
+    message = FALSE,
+    out.width = '100%',
+    fig.retina =3
+  )
 ```
 
-## R Markdown
+## R Setup and Installing Packages
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+This code chunk handles the essential tasks of loading necessary packages, configuring the Census API key, defining class functions, specifying a color palette, and managing global environment settings.
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+```{r Set up Packages, warning = FALSE, message = FALSE}
 
-```{r cars}
-summary(cars)
+# Loading libraries
+
+library(tidyverse)
+library(tidycensus)
+library(sf)
+library(RSocrata)
+library(kableExtra)
+library(spatstat.explore)
+library(raster)
+library(spdep)
+library(FNN)
+library(grid)
+library(gridExtra)
+library(knitr)
+library(tidyr)
+library(ggplot2)
+library(viridis)
+library(stringr)
+library(tigris)
+library(ggcorrplot)
+library(stargazer)
+library(classInt)
+
+# Setting parameters for scientific notation
+
+options(scipen=999)
+options(tigris_class = "sf")
+
+# Functions and data directory
+
+root.dir = "https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/DATA/"
+source("https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/functions.r")
+
+# Invoking color palettes to be used
+
+palettea <- c("#EA526F","#E76B74","#D7AF70","#937D64","#585B56")
+
+paletteb <- c("#f7b267", "#f79d65", "#f4845f", "#f27059", "#f25c54")
+
+palettec <- c("#fde725","#5ec962","#21918c","#3b528b","#440154")
+
+paletted <- c("#ffd700","#ffb14e","#ea5f94","#9d02d7","#0000ff")
+
+palettee <- c('#d7191c','#fdae61','#ffffbf','#abd9e9','#2c7bb6')
+
+# Registering API Key to be used
+
+census_api_key('bf2d507651b5a621dbadd44533fb4f3deaab26bf', overwrite = TRUE)
+
 ```
 
-## Including Plots
+## Read in Data from Chicago
 
-You can also embed plots, for example:
+This uses the Socrata package for some data sets.
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+```{r Read Data, results= 'hide', warning=FALSE}
+policeDistricts <- 
+  st_read("https://data.cityofchicago.org/api/geospatial/fthy-xz3r?method=export&format=GeoJSON") %>%
+  st_transform('ESRI:102271') %>%
+  dplyr::select(District = dist_num)
+  
+policeBeats <- 
+  st_read("https://data.cityofchicago.org/api/geospatial/aerh-rz74?method=export&format=GeoJSON") %>%
+  st_transform('ESRI:102271') %>%
+  dplyr::select(District = beat_num)
+
+bothPoliceUnits <- rbind(mutate(policeDistricts, Legend = "Police Districts"), 
+                         mutate(policeBeats, Legend = "Police Beats"))
+
+arson <- 
+  read.socrata("https://data.cityofchicago.org/Public-Safety/Crimes-2017/d62x-nvdr") %>% 
+    filter(Primary.Type == "ARSON" & Description == "BY FIRE") %>%
+    mutate(x = gsub("[()]", "", Location)) %>%
+    separate(x,into= c("Y","X"), sep=",") %>%
+    mutate(X = as.numeric(X),Y = as.numeric(Y)) %>% 
+    na.omit() %>%
+    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant")%>%
+    st_transform('ESRI:102271') %>% 
+    distinct()
+
+battery <- 
+  read.socrata("https://data.cityofchicago.org/Public-Safety/Crimes-2017/d62x-nvdr") %>% 
+    filter(Primary.Type == "BATTERY" & Description == "SIMPLE") %>%
+    mutate(x = gsub("[()]", "", Location)) %>%
+    separate(x,into= c("Y","X"), sep=",") %>%
+    mutate(X = as.numeric(X),Y = as.numeric(Y)) %>% 
+    na.omit() %>%
+    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant")%>%
+    st_transform('ESRI:102271') %>% 
+    distinct()
+
+domesticbattery <- 
+  read.socrata("https://data.cityofchicago.org/Public-Safety/Crimes-2017/d62x-nvdr") %>% 
+    filter(Primary.Type == "BATTERY" & Description == "DOMESTIC BATTERY SIMPLE") %>%
+    mutate(x = gsub("[()]", "", Location)) %>%
+    separate(x,into= c("Y","X"), sep=",") %>%
+    mutate(X = as.numeric(X),Y = as.numeric(Y)) %>% 
+    na.omit() %>%
+    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant")%>%
+    st_transform('ESRI:102271') %>% 
+    distinct()
+
+criminaldamage <- 
+  read.socrata("https://data.cityofchicago.org/Public-Safety/Crimes-2017/d62x-nvdr") %>% 
+    filter(Primary.Type == "CRIMINAL DAMAGE" & Description == "TO PROPERTY") %>%
+    mutate(x = gsub("[()]", "", Location)) %>%
+    separate(x,into= c("Y","X"), sep=",") %>%
+    mutate(X = as.numeric(X),Y = as.numeric(Y)) %>% 
+    na.omit() %>%
+    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant")%>%
+    st_transform('ESRI:102271') %>% 
+    distinct()
+
+robbery <- 
+  read.socrata("https://data.cityofchicago.org/Public-Safety/Crimes-2017/d62x-nvdr") %>% 
+    filter(Primary.Type == "ROBBERY" & Description == "ARMED: HANDGUN") %>%
+    mutate(x = gsub("[()]", "", Location)) %>%
+    separate(x,into= c("Y","X"), sep=",") %>%
+    mutate(X = as.numeric(X),Y = as.numeric(Y)) %>% 
+    na.omit() %>%
+    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant")%>%
+    st_transform('ESRI:102271') %>% 
+    distinct()
+
+theft <- 
+  read.socrata("https://data.cityofchicago.org/Public-Safety/Crimes-2017/d62x-nvdr") %>% 
+    filter(Primary.Type == "THEFT" & Description == "RETAIL THEFT") %>%
+    mutate(x = gsub("[()]", "", Location)) %>%
+    separate(x,into= c("Y","X"), sep=",") %>%
+    mutate(X = as.numeric(X),Y = as.numeric(Y)) %>% 
+    na.omit() %>%
+    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant")%>%
+    st_transform('ESRI:102271') %>% 
+    distinct()
+
+weaponsviolation <- 
+  read.socrata("https://data.cityofchicago.org/Public-Safety/Crimes-2017/d62x-nvdr") %>% 
+    filter(Primary.Type == "WEAPONS VIOLATION" & Description == "UNLAWFUL POSS OF HANDGUN") %>%
+    mutate(x = gsub("[()]", "", Location)) %>%
+    separate(x,into= c("Y","X"), sep=",") %>%
+    mutate(X = as.numeric(X),Y = as.numeric(Y)) %>% 
+    na.omit() %>%
+    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant")%>%
+    st_transform('ESRI:102271') %>% 
+    distinct()
+
+chicagoBoundary <- 
+  st_read(file.path(root.dir,"/Chapter5/chicagoBoundary.geojson")) %>%
+  st_transform('ESRI:102271') 
+```
+```{r Visualising Point Data for Arson, warning=FALSE, fig.width=7, fig.height=4}
+# uses grid.arrange to organize independent plots
+grid.arrange(ncol=2,
+ggplot() + 
+  geom_sf(data = chicagoBoundary) +
+  geom_sf(data = arson, colour="red", size=0.1, show.legend = "point") +
+  labs(title= "Arson, Chicago - 2017") +
+  mapTheme(title_size = 14),
+
+ggplot() + 
+  geom_sf(data = chicagoBoundary, fill = "grey40") +
+  stat_density2d(data = data.frame(st_coordinates(arson)), 
+                 aes(X, Y, fill = ..level.., alpha = ..level..),
+                 size = 0.01, bins = 40, geom = 'polygon') +
+  scale_fill_viridis() +
+  scale_alpha(range = c(0.00, 0.35), guide = FALSE) +
+  labs(title = "Density of Arson") +
+  mapTheme(title_size = 14) + theme(legend.position = "none"))
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+```{r Visualising Point Data for Battery, warning=FALSE, fig.width=7, fig.height=4}
+# uses grid.arrange to organize independent plots
+grid.arrange(ncol=2,
+ggplot() + 
+  geom_sf(data = chicagoBoundary) +
+  geom_sf(data = battery, colour="red", size=0.1, show.legend = "point") +
+  labs(title= "Battery, Chicago - 2017") +
+  mapTheme(title_size = 14),
+
+ggplot() + 
+  geom_sf(data = chicagoBoundary, fill = "grey40") +
+  stat_density2d(data = data.frame(st_coordinates(battery)), 
+                 aes(X, Y, fill = ..level.., alpha = ..level..),
+                 size = 0.01, bins = 40, geom = 'polygon') +
+  scale_fill_viridis() +
+  scale_alpha(range = c(0.00, 0.35), guide = FALSE) +
+  labs(title = "Density of Battery") +
+  mapTheme(title_size = 14) + theme(legend.position = "none"))
+```
+
+```{r Visualising Point Data for Domestic Battery, warning=FALSE, fig.width=7, fig.height=4}
+# uses grid.arrange to organize independent plots
+grid.arrange(ncol=2,
+ggplot() + 
+  geom_sf(data = chicagoBoundary) +
+  geom_sf(data = domesticbattery, colour="red", size=0.1, show.legend = "point") +
+  labs(title= "Domestic Battery, Chicago - 2017") +
+  mapTheme(title_size = 14),
+
+ggplot() + 
+  geom_sf(data = chicagoBoundary, fill = "grey40") +
+  stat_density2d(data = data.frame(st_coordinates(domesticbattery)), 
+                 aes(X, Y, fill = ..level.., alpha = ..level..),
+                 size = 0.01, bins = 40, geom = 'polygon') +
+  scale_fill_viridis() +
+  scale_alpha(range = c(0.00, 0.35), guide = FALSE) +
+  labs(title = "Density of Domestic Battery") +
+  mapTheme(title_size = 14) + theme(legend.position = "none"))
+```
+
+```{r Visualising Point Data for Criminal Damage, warning=FALSE, fig.width=7, fig.height=4}
+# uses grid.arrange to organize independent plots
+grid.arrange(ncol=2,
+ggplot() + 
+  geom_sf(data = chicagoBoundary) +
+  geom_sf(data = criminaldamage, colour="red", size=0.1, show.legend = "point") +
+  labs(title= "Criminal Damage, Chicago - 2017") +
+  mapTheme(title_size = 14),
+
+ggplot() + 
+  geom_sf(data = chicagoBoundary, fill = "grey40") +
+  stat_density2d(data = data.frame(st_coordinates(criminaldamage)), 
+                 aes(X, Y, fill = ..level.., alpha = ..level..),
+                 size = 0.01, bins = 40, geom = 'polygon') +
+  scale_fill_viridis() +
+  scale_alpha(range = c(0.00, 0.35), guide = FALSE) +
+  labs(title = "Density of Criminal Damage") +
+  mapTheme(title_size = 14) + theme(legend.position = "none"))
+```
+
+```{r Visualising Point Data for Robbery, warning=FALSE, fig.width=7, fig.height=4}
+# uses grid.arrange to organize independent plots
+grid.arrange(ncol=2,
+ggplot() + 
+  geom_sf(data = chicagoBoundary) +
+  geom_sf(data = robbery, colour="red", size=0.1, show.legend = "point") +
+  labs(title= "Robbery, Chicago - 2017") +
+  mapTheme(title_size = 14),
+
+ggplot() + 
+  geom_sf(data = chicagoBoundary, fill = "grey40") +
+  stat_density2d(data = data.frame(st_coordinates(robbery)), 
+                 aes(X, Y, fill = ..level.., alpha = ..level..),
+                 size = 0.01, bins = 40, geom = 'polygon') +
+  scale_fill_viridis() +
+  scale_alpha(range = c(0.00, 0.35), guide = FALSE) +
+  labs(title = "Density of Robbery") +
+  mapTheme(title_size = 14) + theme(legend.position = "none"))
+```
+
+```{r Visualising Point Data for Theft, warning=FALSE, fig.width=7, fig.height=4}
+# uses grid.arrange to organize independent plots
+grid.arrange(ncol=2,
+ggplot() + 
+  geom_sf(data = chicagoBoundary) +
+  geom_sf(data = theft, colour="red", size=0.1, show.legend = "point") +
+  labs(title= "Theft, Chicago - 2017") +
+  mapTheme(title_size = 14),
+
+ggplot() + 
+  geom_sf(data = chicagoBoundary, fill = "grey40") +
+  stat_density2d(data = data.frame(st_coordinates(theft)), 
+                 aes(X, Y, fill = ..level.., alpha = ..level..),
+                 size = 0.01, bins = 40, geom = 'polygon') +
+  scale_fill_viridis() +
+  scale_alpha(range = c(0.00, 0.35), guide = FALSE) +
+  labs(title = "Density of Theft") +
+  mapTheme(title_size = 14) + theme(legend.position = "none"))
+```
+
+
+```{r Visualising Point Data for Weapons Violation, warning=FALSE, fig.width=7, fig.height=4}
+# uses grid.arrange to organize independent plots
+grid.arrange(ncol=2,
+ggplot() + 
+  geom_sf(data = chicagoBoundary) +
+  geom_sf(data = weaponsviolation, colour="red", size=0.1, show.legend = "point") +
+  labs(title= "Weapons Violations, Chicago - 2017") +
+  mapTheme(title_size = 14),
+
+ggplot() + 
+  geom_sf(data = chicagoBoundary, fill = "grey40") +
+  stat_density2d(data = data.frame(st_coordinates(weaponsviolation)), 
+                 aes(X, Y, fill = ..level.., alpha = ..level..),
+                 size = 0.01, bins = 40, geom = 'polygon') +
+  scale_fill_viridis() +
+  scale_alpha(range = c(0.00, 0.35), guide = FALSE) +
+  labs(title = "Density of Weapons Violations") +
+  mapTheme(title_size = 14) + theme(legend.position = "none"))
+```
+## Creating a fishnet grid
+
+```{r}
+## using {sf} to create the grid
+## Note the `.[chicagoBoundary] %>% ` line. This is needed to clip the grid to our data
+fishnet <- 
+  st_make_grid(chicagoBoundary,
+               cellsize = 500, 
+               square = TRUE) %>%
+  .[chicagoBoundary] %>%            # fast way to select intersecting polygons
+  st_sf() %>%
+  mutate(uniqueID = 1:n())
+
+
+```
+
+### Aggregate points to the fishnet
+
+```{r Arson Fishnet, warning=FALSE, fig.width=7, fig.height=4}
+
+crime_net <- 
+  dplyr::select(arson) %>% 
+  mutate(countArson = 1) %>% 
+  aggregate(., fishnet, sum) %>%
+  mutate(countArson = replace_na(countArson, 0),
+         uniqueID = 1:n(),
+         cvID = sample(round(nrow(fishnet) / 24), 
+                       size=nrow(fishnet), replace = TRUE))
+
+ggplot() +
+  geom_sf(data = crime_net, aes(fill = countArson), color = NA) +
+  scale_fill_viridis() +
+  labs(title = "Count of Arson \nfor the fishnet") +
+  mapTheme()
+
+```
+
+```{r Battery Crimes Fishnet, warning=FALSE, fig.width=7, fig.height=4}
+
+crime_net <- 
+  dplyr::select(battery) %>% 
+  mutate(countBattery = 1) %>% 
+  aggregate(., fishnet, sum) %>%
+  mutate(countBattery = replace_na(countBattery, 0),
+         uniqueID = 1:n(),
+         cvID = sample(round(nrow(fishnet) / 24), 
+                       size=nrow(fishnet), replace = TRUE))
+
+ggplot() +
+  geom_sf(data = crime_net, aes(fill = countBattery), color = NA) +
+  scale_fill_viridis() +
+  labs(title = "Count of Battery Crimes \nfor the fishnet") +
+  mapTheme()
+
+```
+
+```{r Domestic Battery Fishnet, warning=FALSE, fig.width=7, fig.height=4}
+
+crime_net <- 
+  dplyr::select(domesticbattery) %>% 
+  mutate(countDomesticBattery = 1) %>% 
+  aggregate(., fishnet, sum) %>%
+  mutate(countDomesticBattery = replace_na(countDomesticBattery, 0),
+         uniqueID = 1:n(),
+         cvID = sample(round(nrow(fishnet) / 24), 
+                       size=nrow(fishnet), replace = TRUE))
+
+ggplot() +
+  geom_sf(data = crime_net, aes(fill = countDomesticBattery), color = NA) +
+  scale_fill_viridis() +
+  labs(title = "Count of Domestic Battery \nfor the fishnet") +
+  mapTheme()
+
+```
+```{r Criminal Damage Fishnet, warning=FALSE, fig.width=7, fig.height=4}
+
+crime_net <- 
+  dplyr::select(criminaldamage) %>% 
+  mutate(countCriminalDamage = 1) %>% 
+  aggregate(., fishnet, sum) %>%
+  mutate(countCriminalDamage = replace_na(countCriminalDamage, 0),
+         uniqueID = 1:n(),
+         cvID = sample(round(nrow(fishnet) / 24), 
+                       size=nrow(fishnet), replace = TRUE))
+
+ggplot() +
+  geom_sf(data = crime_net, aes(fill = countCriminalDamage), color = NA) +
+  scale_fill_viridis() +
+  labs(title = "Count of Criminal Damage \nfor the fishnet") +
+  mapTheme()
+
+```
+
+```{r Robbery Fishnet, warning=FALSE, fig.width=7, fig.height=4}
+
+crime_net <- 
+  dplyr::select(robbery) %>% 
+  mutate(countRobbery = 1) %>% 
+  aggregate(., fishnet, sum) %>%
+  mutate(countRobbery = replace_na(countRobbery, 0),
+         uniqueID = 1:n(),
+         cvID = sample(round(nrow(fishnet) / 24), 
+                       size=nrow(fishnet), replace = TRUE))
+
+ggplot() +
+  geom_sf(data = crime_net, aes(fill = countRobbery), color = NA) +
+  scale_fill_viridis() +
+  labs(title = "Count of Robberies \nfor the fishnet") +
+  mapTheme()
+
+```
+
+```{r Theft Fishnet, warning=FALSE, fig.width=7, fig.height=4}
+
+crime_net <- 
+  dplyr::select(theft) %>% 
+  mutate(countTheft = 1) %>% 
+  aggregate(., fishnet, sum) %>%
+  mutate(countTheft = replace_na(countTheft, 0),
+         uniqueID = 1:n(),
+         cvID = sample(round(nrow(fishnet) / 24), 
+                       size=nrow(fishnet), replace = TRUE))
+
+ggplot() +
+  geom_sf(data = crime_net, aes(fill = countTheft), color = NA) +
+  scale_fill_viridis() +
+  labs(title = "Count of Thefts \nfor the fishnet") +
+  mapTheme()
+
+```
+
+```{r Weapons Violations, warning=FALSE, fig.width=7, fig.height=4}
+
+crime_net <- 
+  dplyr::select(weaponsviolation) %>% 
+  mutate(countWeaponsViolation = 1) %>% 
+  aggregate(., fishnet, sum) %>%
+  mutate(countWeaponsViolation = replace_na(countWeaponsViolation, 0),
+         uniqueID = 1:n(),
+         cvID = sample(round(nrow(fishnet) / 24), 
+                       size=nrow(fishnet), replace = TRUE))
+
+ggplot() +
+  geom_sf(data = crime_net, aes(fill = countWeaponsViolation), color = NA) +
+  scale_fill_viridis() +
+  labs(title = "Count of Weapons Violations \nfor the fishnet") +
+  mapTheme()
+
+```
+
+```{r Data Wrangling, warning=FALSE}
+## Spatial Data Wrangling
+abandonCars <- 
+  read.socrata("https://data.cityofchicago.org/Service-Requests/311-Service-Requests-Abandoned-Vehicles/3c9v-pnva") %>%
+    mutate(year = substr(creation_date,1,4)) %>% filter(year == "2017") %>%
+    dplyr::select(Y = latitude, X = longitude) %>%
+    na.omit() %>%
+    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant") %>%
+    st_transform(st_crs(fishnet)) %>%
+    mutate(Legend = "Abandoned_Cars")
+  
+abandonBuildings <- 
+  read.socrata("https://data.cityofchicago.org/Service-Requests/311-Service-Requests-Vacant-and-Abandoned-Building/7nii-7srd") %>%
+    mutate(year = substr(date_service_request_was_received,1,4)) %>%  filter(year == "2017") %>%
+    dplyr::select(Y = latitude, X = longitude) %>%
+    na.omit() %>%
+    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant") %>%
+    st_transform(st_crs(fishnet)) %>%
+    mutate(Legend = "Abandoned_Buildings")
+
+graffiti <- 
+  read.socrata("https://data.cityofchicago.org/Service-Requests/311-Service-Requests-Graffiti-Removal-Historical/hec5-y4x5") %>%
+    mutate(year = substr(creation_date,1,4)) %>% filter(year == "2017") %>%
+    filter(where_is_the_graffiti_located_ %in% c("Front", "Rear", "Side")) %>%
+    dplyr::select(Y = latitude, X = longitude) %>%
+    na.omit() %>%
+    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant") %>%
+    st_transform(st_crs(fishnet)) %>%
+    mutate(Legend = "Graffiti")
+
+streetLightsOut <- 
+  read.socrata("https://data.cityofchicago.org/Service-Requests/311-Service-Requests-Street-Lights-All-Out/zuxi-7xem") %>%
+    mutate(year = substr(creation_date,1,4)) %>% filter(year == "2017") %>%
+    dplyr::select(Y = latitude, X = longitude) %>%
+    na.omit() %>%
+    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant") %>%
+    st_transform(st_crs(fishnet)) %>%
+    mutate(Legend = "Street_Lights_Out")
+
+sanitation <-
+  read.socrata("https://data.cityofchicago.org/Service-Requests/311-Service-Requests-Sanitation-Code-Complaints-Hi/me59-5fac") %>%
+    mutate(year = substr(creation_date,1,4)) %>% filter(year == "2017") %>%
+    dplyr::select(Y = latitude, X = longitude) %>%
+    na.omit() %>%
+    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant") %>%
+    st_transform(st_crs(fishnet)) %>%
+    mutate(Legend = "Sanitation")
+
+liquorRetail <- 
+  read.socrata("https://data.cityofchicago.org/resource/nrmj-3kcf.json") %>%  
+    filter(business_activity == "Retail Sales of Packaged Liquor") %>%
+    dplyr::select(Y = latitude, X = longitude) %>%
+    na.omit() %>%
+    st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant") %>%
+    st_transform(st_crs(fishnet)) %>%
+    mutate(Legend = "Liquor_Retail")
+
+affordableHousing <- 
+    read.socrata("https://data.cityofchicago.org/resource/s6ha-ppgi.json") %>%
+     dplyr::select(Y = latitude, X = longitude) %>%
+     na.omit() %>%
+     st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant") %>%
+     st_transform(st_crs(fishnet)) %>%
+     mutate(Legend = "Affordable_Rental_Housing_Development")
+
+bikeRacks <- 
+    read.socrata("https://data.cityofchicago.org/resource/4ywc-hr3a.json") %>%
+     dplyr::select(Y = latitude, X = longitude) %>%
+     na.omit() %>%
+     st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant") %>%
+     st_transform(st_crs(fishnet)) %>%
+     mutate(Legend = "Bike_Racks")
+
+ctaStations <- 
+    read.socrata("./data/cta_entrances.geojson") %>%
+     dplyr::select(Y = latitude, X = longitude) %>%
+     na.omit() %>%
+     st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant") %>%
+     st_transform(st_crs(fishnet)) %>%
+     mutate(Legend = "Grocery_Stores")
+
+metraStations <- 
+    read.socrata("./data/metra_entrances.geojson") %>%
+     dplyr::select(Y = latitude, X = longitude) %>%
+     na.omit() %>%
+     st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant") %>%
+     st_transform(st_crs(fishnet)) %>%
+     mutate(Legend = "Grocery_Stores")
+
+groceryStores <- 
+    read.socrata("https://data.cityofchicago.org/resource/ce29-twzt.json") %>%
+     dplyr::select(Y = latitude, X = longitude) %>%
+     na.omit() %>%
+     st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant") %>%
+     st_transform(st_crs(fishnet)) %>%
+     mutate(Legend = "Grocery_Stores")
+
+## Neighborhoods Data Wrangling
+neighborhoods <- 
+  st_read("https://raw.githubusercontent.com/blackmad/neighborhoods/master/chicago.geojson") %>%
+  st_transform(st_crs(fishnet)) 
+
+
+```

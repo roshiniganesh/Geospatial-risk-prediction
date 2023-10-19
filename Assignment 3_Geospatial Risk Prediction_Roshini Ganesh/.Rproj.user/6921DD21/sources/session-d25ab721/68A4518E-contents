@@ -1,6 +1,6 @@
 ---
-title: "Predicting Housing Prices in Philadelphia, PA"
-author: "Samriddhi Khare, Roshini Ganesh"
+title: "Analyzing Geospatial Risk Factors in Chicago, IL"
+author: "Roshini Ganesh"
 date: "`r Sys.Date()`"
 output:
   html_document:
